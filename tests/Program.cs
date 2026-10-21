@@ -1,0 +1,25 @@
+using System.Text.Json.Nodes;
+using WinDiagnostics;
+var failures=0;var passed=0;
+void Assert(bool value,string why){if(!value)throw new Exception(why);}
+void Reject(Action action){try{action();}catch(ArgumentException){return;}throw new Exception("expected ArgumentException");}
+void Has(List<Finding> f,string id)=>Assert(f.Any(x=>x.Id==id),"missing finding "+id);
+void Lacks(List<Finding> f,string id)=>Assert(f.All(x=>x.Id!=id),"unexpected finding "+id);
+void Check(string name,Action body){try{body();passed++;Console.WriteLine("PASS "+name);}catch(Exception e){failures++;Console.Error.WriteLine("FAIL "+name+": "+e);}}
+async Task AsyncCheck(string name,Func<Task> body){try{await body();passed++;Console.WriteLine("PASS "+name);}catch(Exception e){failures++;Console.Error.WriteLine("FAIL "+name+": "+e);}}
+var fixturePath=Path.Combine(AppContext.BaseDirectory,"fixture.json");
+JsonObject Snapshot()=>(JsonObject)JsonNode.Parse(File.ReadAllText(fixturePath))!;
+JsonObject Fixture()=>(JsonObject)Snapshot()["evidence"]!.DeepClone();
+Check("fixture schema and snapshot replay",()=>{var c=Core.ReadSnapshot(Snapshot());Tool.ValidateEvidence(c.Evidence);Assert(c.Issues.Count==0,"fixture issues");Assert(Tool.Analyze(c.Evidence).Count>0,"fixture finding");});
+Check("strict arguments and snapshot ownership",()=>{Reject(()=>Options.Parse(["--unknown"],Tool.ValueOptions,Tool.Flags));Reject(()=>Options.Parse(["--input"],Tool.ValueOptions,Tool.Flags));Reject(()=>Options.Parse(["--json","--json"],Tool.ValueOptions,Tool.Flags));var s=Snapshot();s["tool"]="another-tool";Reject(()=>Core.ReadSnapshot(s));s=Snapshot();s["schemaVersion"]=2;Reject(()=>Core.ReadSnapshot(s));s=Snapshot();s["issues"]=null;Reject(()=>Core.ReadSnapshot(s));Reject(()=>Tool.ValidateEvidence(new JsonObject()));});
+Check("TLS failures and proxy context remain distinct",()=>{var f=Tool.Analyze(Fixture());Has(f,"tls-handshake-failed");Has(f,"proxy-context");Lacks(f,"tls-tcp-failed");Reject(()=>Tool.Target("http://example.invalid"));Reject(()=>Tool.Target("https://name:secret@example.invalid"));Assert(!Tool.RedactProxy("http://name:secret@proxy.invalid:80").Contains("secret"),"credential redaction");});
+await AsyncCheck("loopback TLS rejects an untrusted mismatched certificate",async()=>{
+ using var rsa=System.Security.Cryptography.RSA.Create(2048);var req=new System.Security.Cryptography.X509Certificates.CertificateRequest("CN=localhost",rsa,System.Security.Cryptography.HashAlgorithmName.SHA256,System.Security.Cryptography.RSASignaturePadding.Pkcs1);using var cert=req.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1),DateTimeOffset.UtcNow.AddHours(1));
+ var listener=new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);listener.Start();using var budget=new CancellationTokenSource(TimeSpan.FromSeconds(10));
+ try{var port=((System.Net.IPEndPoint)listener.LocalEndpoint).Port;var server=Task.Run(async()=>{using var client=await listener.AcceptTcpClientAsync(budget.Token);using var ssl=new System.Net.Security.SslStream(client.GetStream(),false);try{await ssl.AuthenticateAsServerAsync(new System.Net.Security.SslServerAuthenticationOptions{ServerCertificate=cert},budget.Token);}catch(Exception ex)when(ex is System.Security.Authentication.AuthenticationException or IOException or OperationCanceledException){} });
+ var o=Options.Parse(["--url","https://127.0.0.1:"+port,"--timeout","5","--revocation","none"],Tool.ValueOptions,Tool.Flags);var c=await Tool.Collect(o,budget.Token);Assert(J.Bool(c.Evidence["tcp"],"success"),"TCP established");Assert(J.Bool(c.Evidence["tls"],"validationObserved"),"validation callback ran");Assert(!J.Bool(c.Evidence["tls"],"success"),"invalid certificate rejected");Has(Tool.Analyze(c.Evidence),"tls-handshake-failed");await server;}finally{listener.Stop();}
+});
+await AsyncCheck("silent loopback peer respects timeout",async()=>{var listener=new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);listener.Start();using var budget=new CancellationTokenSource(TimeSpan.FromSeconds(8));try{var port=((System.Net.IPEndPoint)listener.LocalEndpoint).Port;var accepted=listener.AcceptTcpClientAsync(budget.Token);var o=Options.Parse(["--url","https://127.0.0.1:"+port,"--timeout","1","--revocation","none"],Tool.ValueOptions,Tool.Flags);var c=await Tool.Collect(o,budget.Token);using var peer=await accepted;Assert(!J.Bool(c.Evidence["tls"],"success"),"silent TLS must fail");Assert(J.Text(c.Evidence["tls"],"error").Length>0,"timeout evidence");}finally{listener.Stop();}});
+if(OperatingSystem.IsWindows()&&Tool.SmokeArgs.Length>0)await AsyncCheck("Windows live collector smoke",async()=>{using var ct=new CancellationTokenSource(TimeSpan.FromSeconds(100));var o=Options.Parse(Tool.SmokeArgs,Tool.ValueOptions,Tool.Flags);Tool.ValidateOptions(o);var c=await Tool.Collect(o,ct.Token);Tool.ValidateEvidence(c.Evidence);Console.WriteLine($"Live collector issues: {c.Issues.Count}");});
+Console.WriteLine($"{passed} passed; {failures} failed");
+return failures==0?0:1;

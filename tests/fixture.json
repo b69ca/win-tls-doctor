@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "tool": "win-tls-doctor",
+  "collectedAtUtc": "2026-01-10T12:00:00Z",
+  "platform": "Synthetic Windows fixture",
+  "evidence": {
+    "target": "https://example.invalid",
+    "host": "example.invalid",
+    "port": 443,
+    "connectionMode": "direct",
+    "revocationMode": "online",
+    "dns": {
+      "success": true,
+      "addresses": [
+        "192.0.2.10"
+      ]
+    },
+    "tcp": {
+      "attempted": true,
+      "success": true,
+      "remoteEndpoint": "192.0.2.10:443"
+    },
+    "tls": {
+      "attempted": true,
+      "success": false,
+      "validationObserved": true,
+      "policyErrors": "RemoteCertificateChainErrors",
+      "chainStatus": [
+        {
+          "status": "UntrustedRoot",
+          "information": "Example untrusted certificate."
+        }
+      ],
+      "error": "Example authentication failure."
+    },
+    "proxy": {
+      "userProxyEnabled": true,
+      "userProxyServer": "proxy.example.invalid:8080",
+      "pacConfigured": false
+    }
+  },
+  "issues": []
+}
