@@ -1,0 +1,37 @@
+name: build-and-test
+on: [push, pull_request]
+permissions: {contents: read}
+jobs:
+  check:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet build WinTlsDoctor.csproj -c Release
+      - run: dotnet run --project tests/Checks.csproj -c Release
+      - run: dotnet run --project WinTlsDoctor.csproj -c Release -- --input tests/fixture.json --json
+      - name: Check collector syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path Collector.ps1) {
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseInput((Get-Content Collector.ps1 -Raw), [ref]$null, [ref]$parseErrors) | Out-Null
+            if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
+          }
+      - name: Publish standalone Windows executable
+        if: runner.os == 'Windows'
+        run: dotnet publish WinTlsDoctor.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o artifacts/win-x64
+      - name: Check standalone executable
+        if: runner.os == 'Windows'
+        run: .\artifacts\win-x64\win-tls-doctor.exe --input tests/fixture.json --json
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: win-tls-doctor-win-x64
+          path: artifacts/win-x64/
