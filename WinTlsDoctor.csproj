@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <AssemblyName>win-tls-doctor</AssemblyName><RootNamespace>WinDiagnostics</RootNamespace><Version>1.0.0</Version><Description>Diagnose direct HTTPS DNS, TCP, TLS, certificate, and proxy-configuration problems.</Description><EnableNETAnalyzers>true</EnableNETAnalyzers>
+  </PropertyGroup>
+  <ItemGroup><Compile Remove="tests/**/*.cs" /><EmbeddedResource Include="Collector.ps1" LogicalName="Collector.ps1" Condition="Exists('Collector.ps1')" /></ItemGroup>
+</Project>
